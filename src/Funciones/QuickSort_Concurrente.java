@@ -1,134 +1,136 @@
 package Funciones;
 
-import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ForkJoinPool; // Importa ForkJoinPool para una gestión de hilos más eficiente
 
-// Clase que implementa la interfaz Runnable para poder ser ejecutada en un hilo
+// Implementa Runnable para permitir ejecución en un hilo.
 public class QuickSort_Concurrente implements Runnable {
 
-	// Constante que define el número máximo de hilos disponibles según el número de
-	// procesadores
-	public static final int MAX_THREADS = Runtime.getRuntime().availableProcessors();
+    // Instancia de ForkJoinPool, creada una vez y usada por todos los hilos.
+    // Número de hilos basado en los núcleos de CPU disponibles.
+    public static final ForkJoinPool forkJoinPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
 
-	// Pool de hilos para la ejecución concurrente
-	public static final ExecutorService executor = Executors.newFixedThreadPool(MAX_THREADS);
+    // Array a ordenar y rango (inicio, fin) de la partición actual.
+    final int[] my_array;
+    final int start, end;
 
-	// Variables de instancia para el array a ordenar y los índices de inicio y fin
-	final int[] my_array;
-	final int start, end;
+    // Umbral: si la partición es más pequeña, se ordena secuencialmente para evitar sobrecarga de hilos.
+    private final int minPartitionSize;
 
-	// Tamaño mínimo de la partición para paralelizar
-	private final int minParitionSize;
+    // Constructor: inicializa el array, rango y tamaño mínimo de partición.
+    public QuickSort_Concurrente(int minPartitionSize, int[] array, int start, int end) {
+        this.minPartitionSize = minPartitionSize;
+        this.my_array = array;
+        this.start = start;
+        this.end = end;
+    }
 
-	// Constructor de la clase
-	public QuickSort_Concurrente(int minParitionSize, int[] array, int start, int end) {
-		this.minParitionSize = minParitionSize;
-		this.my_array = array;
-		this.start = start;
-		this.end = end;
-	}
+    // Método que se ejecuta al iniciar el hilo: llama al quicksort principal.
+    @Override
+    public void run() {
+        quicksort(my_array, start, end);
+    }
 
-	// Método run que se ejecutará cuando el hilo inicie
-	public void run() {
-		quicksort(my_array, start, end);
-	}
+    // El método generarArrayAleatorio ha sido movido a GeneradorDeArrays.
 
-	public static int[] generarArrayAleatorio(int n, int min, int max) {
-		// Declaración del array
-		int[] arr = new int[n];
+    // Imprime los elementos de un array en la consola.
+    public static void mostrarArray(int[] arr) {
+        System.out.println("\n-----------------------:\n"); // Imprime un separador.
+        for (int num : arr) { // Itera y muestra cada número.
+            System.out.print(num + " - ");
+        }
+    }
 
-		// Generación de números aleatorios
-		Random random = new Random();
-		for (int i = 0; i < n; i++) {
-			arr[i] = random.nextInt(max - min + 1) + min;
-		}
+    // Implementación del algoritmo QuickSort, con lógica para paralelizar o ejecutar secuencialmente.
+    private void quicksort(int[] array, int start, int end) {
+        int len = end - start + 1;
 
-		return arr;
-	}
+        if (len <= 1) { // Caso base: array de 0 o 1 elemento ya está ordenado.
+            return;
+        }
 
-	public static void mostrarArray(int[] arr) {
-		System.out.println("\n-----------------------:\n");
-		for (int num : arr) {
-			System.out.print(num + " - ");
-		}
-	}
+        // Si la partición es pequeña (debajo del umbral), se ordena secuencialmente.
+        if (len <= minPartitionSize) {
+            // Lógica de partición y ordenamiento secuencial (sin crear nuevos hilos).
+            int pivot_index = medianOfThree(array, start, end);
+            int pivotValue = array[pivot_index];
+            swap(array, pivot_index, end);
 
-	// Método que implementa el algoritmo QuickSort
-	public void quicksort(int[] array, int start, int end) {
-		int len = end - start + 1;
+            int storeIndex = start;
+            for (int i = start; i < end; i++) {
+                if (array[i] <= pivotValue) {
+                    swap(array, i, storeIndex);
+                    storeIndex++;
+                }
+            }
+            swap(array, storeIndex, end);
 
-		// Si la longitud de la partición es 1 o menos, no se necesita ordenar
-		if (len <= 1)
-			return;
+            // Llamadas recursivas secuenciales para las sub-particiones.
+            quicksort(array, start, storeIndex - 1);
+            quicksort(array, storeIndex + 1, end);
 
-		// Selección del pivote usando la técnica de la mediana de tres
-		int pivot_index = medianOfThree(array, start, end);
-		int pivotValue = array[pivot_index];
+        } else { // Si la partición es grande, se paraleliza.
+            // Lógica de partición (igual que en el caso secuencial).
+            int pivot_index = medianOfThree(array, start, end);
+            int pivotValue = array[pivot_index];
+            swap(array, pivot_index, end);
 
-		// Intercambio del pivote con el elemento al final del array
-		swap(array, pivot_index, end);
+            int storeIndex = start;
+            for (int i = start; i < end; i++) {
+                if (array[i] <= pivotValue) {
+                    swap(array, i, storeIndex);
+                    storeIndex++;
+                }
+            }
+            swap(array, storeIndex, end);
 
-		int storeIndex = start;
-		for (int i = start; i < end; i++) {
-			if (array[i] <= pivotValue) {
-				swap(array, i, storeIndex);
-				storeIndex++;
-			}
-		}
+            // Crea tareas para las sub-particiones izquierda y derecha.
+            QuickSort_Concurrente leftQuick = new QuickSort_Concurrente(minPartitionSize, array, start, storeIndex - 1);
+            QuickSort_Concurrente rightQuick = new QuickSort_Concurrente(minPartitionSize, array, storeIndex + 1, end);
 
-		// Colocar el pivote en su posición correcta
-		swap(array, storeIndex, end);
+            // Envía las tareas al ForkJoinPool para ejecución concurrente.
+            Future<?> leftFuture = forkJoinPool.submit(leftQuick);
+            Future<?> rightFuture = forkJoinPool.submit(rightQuick);
 
-		// Si la partición es lo suficientemente grande, paralelizar
-		if (len > minParitionSize) {
-			/*
-			 * QuickSort_Concurrente quick = new QuickSort_Concurrente(minParitionSize,
-			 * array, start, storeIndex - 1); Future<?> future = executor.submit(quick);
-			 * quicksort(array, storeIndex + 1, end);
-			 */
-			QuickSort_Concurrente leftQuick = new QuickSort_Concurrente(minParitionSize, array, start, storeIndex - 1);
-			QuickSort_Concurrente rightQuick = new QuickSort_Concurrente(minParitionSize, array, storeIndex + 1, end);
-			Future<?> leftFuture = executor.submit(leftQuick);
-			Future<?> rightFuture = executor.submit(rightQuick);
+            // Espera a que ambas tareas (hilos) terminen antes de continuar.
+            try {
+                leftFuture.get();
+                rightFuture.get();
+            } catch (Exception ex) { // Captura y maneja posibles excepciones de los hilos.
+                ex.printStackTrace();
+                Thread.currentThread().interrupt(); // Restaura el estado de interrupción.
+            }
+        }
+    }
 
-			// Esperar a que el subproceso finalice
-			try {
-				// future.get(1000, TimeUnit.SECONDS);
-				leftFuture.get(1000, TimeUnit.SECONDS);
-				rightFuture.get(1000, TimeUnit.SECONDS);
-			} catch (Exception ex) {
-				ex.printStackTrace();
-			}
-		} else {
-			// Si no, ordenar de forma secuencial
-			quicksort(array, start, storeIndex - 1);
-			quicksort(array, storeIndex + 1, end);
-		}
-	}
+    // Elige el pivote usando la "mediana de tres" para una mejor selección.
+    private int medianOfThree(int[] array, int start, int end) {
+        int mid = start + (end - start) / 2; // Cálculo seguro del punto medio.
+        if (array[start] > array[mid]) { swap(array, start, mid); }
+        if (array[start] > array[end]) { swap(array, start, end); }
+        if (array[mid] > array[end]) { swap(array, mid, end); }
+        return mid; // Retorna el índice del pivote (que ahora está en 'mid').
+    }
 
-// Método que selecciona la mediana de tres elementos como pivote
-	private int medianOfThree(int[] array, int start, int end) {
-		int mid = (start + end) / 2;
-		if (array[start] > array[mid]) {
-			swap(array, start, mid);
-		}
-		if (array[start] > array[end]) {
-			swap(array, start, end);
-		}
-		if (array[mid] > array[end]) {
-			swap(array, mid, end);
-		}
-		return mid;
-	}
+    // Intercambia dos elementos en el array.
+    private void swap(int[] array, int i, int j) {
+        int temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
 
-// Método que intercambia dos elementos en el array
-	private void swap(int[] array, int i, int j) {
-		int temp = array[i];
-		array[i] = array[j];
-		array[j] = temp;
-	}
-
+    // Apaga el ForkJoinPool de forma segura, liberando los recursos de los hilos.
+    public static void shutdownPool() {
+        forkJoinPool.shutdown(); // Inicia el apagado.
+        try {
+            // Espera hasta 60 segundos para que las tareas terminen.
+            if (!forkJoinPool.awaitTermination(60, TimeUnit.SECONDS)) {
+                forkJoinPool.shutdownNow(); // Si no terminan, fuerza el apagado.
+            }
+        } catch (InterruptedException e) { // Maneja interrupciones durante la espera.
+            forkJoinPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 }
